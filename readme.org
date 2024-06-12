@@ -1,0 +1,16 @@
+#+title: Readme
+
+Lua is not far from Scheme. It was inspired by Scheme. They are both minimalist, lexically scoped, dynamic languages with tail-call optimization.
+
+[Fennel](https://fennel-lang.org/), with s-expressions and macros is even closer.
+
+I want to see what it's like to close the gap.
+
+* Implementation notes
+** Language: For portability, I want a complete implementation in Fennel. I might eventually write alternate implementations for parts  in C as an optimization, but I want a pure Fennel implementation first.
+
+** Architecture: Layers.
+I want it to be possible to blend Fennel and Scheme since they're already so close. There's also a lot of Fennel features I wouldn't want to give up on the scheme side, like destructuring and tables.
+*** The base will be a Fennel library that implements the standard scheme functions and types. I hope this will be useful as a library for Lua or Fennel programming on its own, non-scheme programs.
+*** Then I think we need a macro layer to implement the standard scheme forms and macros
+*** Continuations, hygienic macros, and the r7rs package system might require a new layer. But I hope scheme code that doesn't use these features can be written directly in Fennel after ~require~ing the appropriate libraries
