@@ -1,4 +1,5 @@
 (local debug-assert assert)
+(macro debug-do [...] `(do ,...))
 
 (fn number?    [n] (= (type n) :number))
 (fn boolean?   [x] (= (type x) :boolean))
@@ -13,10 +14,10 @@
 
 (local eq? rawequal)
 (fn equal? [x y] (= x y))
-(fn exact? [n] false)
-(fn inexact? [n] (number? n))
-;; TODO: how should exactness fit with Lua's types?
 (fn integer? [n] (= (math.type n) :integer))
+(fn exact? [n] (integer?))
+(fn inexact? [n] (and (number? n) (not (exact? n))))
+;; TODO: how should exactness fit with Lua's types?
 (fn exact-integer? [n]
   (and (exact? n) (integer? n)))
 (local inf math.huge)
@@ -202,22 +203,54 @@ is an error to take the cdr of the empty list. (r7rs 41)
 (local assq #(assoc $1 $2 eq?))
 (local assv #(assoc $1 $2 eqv?))
 
+;; r7rs 6.8  p.48
 (local vector-mt {})
 (fn vector? [x]
+  "Returns #t if obj is a vector; otherwise returns #f."
   (= (getmetatable x) vector-mt))
-(fn vector-ref [vec k obj force?]
-  (assert (vector? vec))
-  (assert (number? k))
-  (zaccess vec k obj force?))
-(fn vector-set! [vec k obj]
-  (vector-ref vec k obj true))
+;; store length as field :n to match Lua's convention
 (fn make-vector [k fill]
+  "Returns a newly allocated vector of ~k~ elements. If a second
+argument is given, then each element is initialized to ~fill~.
+Otherwise the initial contents of each element is unspecified. (r7rs 48)"
   (assert (number? k))
-  (let [acc (setmetatable {:length k} vector-mt)]
-    (for [i 1 k]
-      (. acc i fill))
-    acc))
-(fn vector-length [v] v.length)
+  (let [vec (setmetatable {:n k} vector-mt)]
+    (vector-fill! vec fill)
+    vec))
+(fn vector [...]
+  "Returns a newly allocated vector whose elements contain
+the given arguments. It is analogous to list. (r7rs 48)"
+  (setmetatable (table.pack ...) vector-mt))
+(fn vector-length [v]
+  "Returns the number of elements in vector as an exact integer. (r7rs 48)"
+  v.n)
+(fn raw-vector-ref [vec k obj force?]
+  (zaccess vec k obj force?))
+(fn vector-ref [vec k obj force?]
+  "The vector-ref procedure returns the contents of element
+k of vector (r7rs 48).
+
+'Undocumented' extention: behaves like accessor if you pass extra args"
+  (debug-assert (vector? vec))
+  (debug-assert (number? k))
+  ;; It is an error if ~k~ is not a valid index of vector. (r7rs 48)
+  (debug-assert (and (<= 0 k) (< k (vector-length vec))))
+  (raw-vector-ref vec k obj force?))
+(fn vector-set! [vec k obj]
+  "The vector-set! procedure stores obj in element k of
+vector (r7rs 48)."
+  (vector-ref vec k obj true))
+(macro xfor [[var start end] ...]
+  "For but with half-open interval: [start,end)"
+  `(for [,var ,start (- ,end 1)]
+    ,...))
+(fn vector-fill! [vec fill start end]
+  "The ~vector-fill!~ procedure stores fill in the elements of
+vector between start and end."
+  (let [start (or start 0)
+        end   (or end (length end))]
+    (xfor [i start end]
+      (vector-set! vec i fill))))
 (set vector-mt.__len vector-length)
 (fn vector-mt.__eq [x y]
   (and (= (vector-length x) (vector-length y))
@@ -226,9 +259,69 @@ is an error to take the cdr of the empty list. (r7rs 41)
                        i 1 k
                        &until (not ok)]
            (= (. x i) (. y i))))))
+(local vector->list seq->list)
+;;; TODO: list->seq + list->vector
+;;; TODO: vector->string, string->vector
+(fn no-overlap? [[a b] [c d]]
+  (or (<= b c) (<= d a)))
+(fn vector-copy-no-overlap! [to at from start end]
+  (let [start (or start 0)
+        end   (or end (vector-length end))
+        len   (- end start)]
+    (debug-assert (if (eq? to from)
+                      (no-overlap? [at (+ at len)] [start end])))
+    (xfor [i 0 len]
+      (vector-set to (+ at i)
+                  (raw-vector-set! (+ start i))))))
+;; TODO: improve name. My real goal for this function is to allow growing vectors.
+(fn raw-vector-copy! [to at from start end]
+  ;; TODO: optimize
+  ;; > This can be achieved without allocating storage by
+  ;; > making sure to copy in the correct direction in
+  ;; > such circumstances.  (r7rs 49)
+  ;; suboptimal but correct implementation:
+  (if (eq? to from)
+      (let [len (- end start)
+            buf (make-vector len)]
+        (vector-copy-no-overlap! buf 0 from start end)
+        (vector-copy-no-overlap! to at buf 0 len))
+      (vector-copy-no-overlap! to at from start end)))
+(fn vector-copy! [to at from start end]
+  "It is an error if at is less than zero or greater than the length
+of to. It is also an error if (- (vector-length to) at) is less
+than (- end start).
+
+Copies the elements of vector from between start and end
+to vector to, starting at at. The order in which elements
+are copied is unspecified, except that if the source and des-
+tination overlap, copying takes place as if the source is first
+copied into a temporary vector and then into the destina-
+tion. This can be achieved without allocating storage by
+making sure to copy in the correct direction in such cir-
+cumstances. (r7rs 49)"
+  (debug-do
+   (let [start (or start 0)
+         end   (or end (vector-length from))]
+     (assert (not (or (< at 0) (> at (length to))))
+                   "It is an error if at is less than zero or greater than the length of to (r7rs 49).")
+     (assert (not (< (- (vector-length to) at)
+                           (- end start)))
+                   "It is also an error if (- (vector-length to) at) is less than (- end start). (r7rs 49)")))
+  (raw-vector-copy! to at from start end))
+(fn vector-copy [vec start end]
+  (let [start (or start 0)
+        end (or end (vector-length vec))
+        new-vec {}]
+    (tset :n new-vec (- end start))
+    (raw-vector-copy! new-vec 0 vec)
+    new-vec))
 
 (local bytevector-mt {})
 (fn bytevector? [x]
   (= (getmetatable x) bytevector-mt))
 
 {: null : null? : cons : car : cdr : pair? : list : cons*}
+
+;; Local Variables:
+;; eval: (put 'xfor 'fennel-indent-function 'defun)
+;; End:
