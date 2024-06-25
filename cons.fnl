@@ -3,11 +3,13 @@
 
 (fn number?    [n] (= (type n) :number))
 (fn boolean?   [x] (= (type x) :boolean))
-(fn procedure? [f] (= (type f) :function))
+(fn procedure? [f]
+  "Returns #t if obj is a procedure, otherwise returns #f."
+  (= (type f) :function))
 ;; Lua strings are immutable and interned, like scheme's symbols
 ;; Scheme's strings are mutable arrays.
 (fn symbol?    [s] (= (type s) :string))
-(fn zero? [n] (= n 0))
+(fn zero?      [n] (= n 0))
 
 (fn nil? [x] (= x nil))
 ;; TODO: Should I match up nil with undefined?
@@ -26,8 +28,8 @@
   (or (= x inf) (= x ninf)))
 (fn finite? [x]
   (and (< ninf x) (< x inf)))
-;; > One reason is that it is not always possible to compute eqv? of two
-;; > numbers in constant time, whereas eq? implemented as pointer
+;; > One reason is that it is not always possible to compute `eqv?' of two
+;; > numbers in constant time, whereas `eq?' implemented as pointer
 ;; > comparison will always finish in constant time.
 ;; --r7rs p32
 (fn eqv? [x y]
@@ -45,27 +47,27 @@
 ;;; scheme lists which are null terminated <--
 ;;; I am only doing scheme lists
 (local null {})
-(fn null? [x]
-  "Returns #t if obj is the empty list, otherwise returns #f (r7rs 42)"
-  (= x null))
+(fn null? [obj]
+  "Returns #t if OBJ is the empty list, otherwise returns #f (r7rs 42)"
+  (= obj null))
 
 (local cars (setmetatable {} {:__mode "k"}))
 (local cdrs (setmetatable {} {:__mode "k"}))
 
 (fn access [tbl key val force-set?]
-  "Read or write the field ~key~ in ~tbl~.
+  "Read or write the field KEY in TBL.
 Calling access with only two arguments reads:
-(access tbl key) ==> (. table key)
+(access TBL KEY) ==> (. table KEY)
 
 Calling access with an additional (non-nil) argument sets:
-(access tbl key new-value) ==> (tset tbl key)
+(access TBL KEY NEW-VALUE) ==> (tset TBL KEY NEW-VALUE)
 
-To distinguish setting nil from reading, pass true for force-set?:
+To disambiguate setting nil from reading, pass true for force-set?:
 
-(access tbl key maybe-nil true) => (tset tbl key)
+(access TBL KEY MAYBE-NIL TRUE) => (tset TBL KEY MAYBE-NIL TRUE)
 
 which allows unsetting:
-(access tbl key nil true) => (tset tbl key nil) "
+(access TBL KEY nil TRUE) => (tset TBL KEY nil) "
   (if (or val force-set?)
       (tset tbl key val)
       (. tbl key)))
@@ -76,8 +78,8 @@ which allows unsetting:
       (+ n 1)
       n))
 (fn zaccess [tbl key val force-set?]
-  "Adapt ~access~ for javascript-style indexing a la zshift. When ~key~
-is not a number, ~zaccess~ is equivalent to ~access~. When ~key~ is a
+  "Adapt `access' for javascript-style indexing via `zshift'. When KEY
+is not a number, `zaccess' is equivalent to `access'. When KEY is a
 number, add 1.
 
 (zaccess tbl N ...) => (access tbl (+ 1 N) ...)
@@ -88,20 +90,20 @@ number, add 1.
 (local pair-mt {})
 (fn pair? [x] (= (getmetatable x) pair-mt))
 
-(fn car [cell val force-set?]
-  "Returns the contents of the car field of pair . Note that it
+(fn car [pair val force-set?]
+  "Returns the contents of the car field of PAIR . Note that it
 is an error to take the car of the empty list. (r7rs 41)
 
-'Undocumented' extension: val and force-set? can be used to set the car"
-  (debug-assert (pair? cell))
-  (access cars cell val force-set?))
-(fn cdr [cell val force-set?]
-  "Returns the contents of the cdr field of pair . Note that it
+'Undocumented' extension: VAL and FORCE-SET? can be used to set the car"
+  (debug-assert (pair? pair))
+  (access cars pair val force-set?))
+(fn cdr [pair val force-set?]
+  "Returns the contents of the cdr field of PAIR . Note that it
 is an error to take the cdr of the empty list. (r7rs 41)
 
-'Undocumented' extension: val and force-set? can be used to set the car"
-  (debug-assert (pair? cell))
-  (access cdrs cell val force-set?))
+'Undocumented' extension: VAL and FORCE-SET? can be used to set the car"
+  (debug-assert (pair? pair))
+  (access cdrs pair val force-set?))
 (fn set-car! [cell val] (car cell val true))
 (fn set-cdr! [cell val] (cdr cell val true))
 ;; cdadrs (r7rs 42)
@@ -131,15 +133,16 @@ is an error to take the cdr of the empty list. (r7rs 41)
           (set i (+ 1 i))
           (set cell (cdr cell))
           (values old a)))))
-(set pair-mt.__pair icons)
+(set pair-mt.__pairs icons)
+(set pair-mt.__ipairs icons)
 
 (fn cons [a d]
-  "Construct a pair (cons cell) with car ~a~ and cdr ~d~"
+  "Construct a pair (cons cell) with car `a' and cdr `d'"
   (let [cell (setmetatable {} pair-mt)]
     (car cell a true)
     (cdr cell d true)
     cell))
-(fn uncons [cell]
+(fn car+cdr [cell]
   "Return the car and cdr. Useful for destructuring. "
   (values (car cell) (cdr cell)))
 
@@ -184,7 +187,7 @@ is an error to take the cdr of the empty list. (r7rs 41)
 (fn mem-pred [lst pred?]
   (fn loop [lst]
     (if (null? lst) false
-        (let [(a d) (uncons lst)]
+        (let [(a d) (car+cdr lst)]
           (if (pred? a) lst
               (loop d)))))
   (loop lst))
@@ -205,13 +208,13 @@ is an error to take the cdr of the empty list. (r7rs 41)
 
 ;; r7rs 6.8  p.48
 (local vector-mt {})
-(fn vector? [x]
-  "Returns #t if obj is a vector; otherwise returns #f."
-  (= (getmetatable x) vector-mt))
+(fn vector? [obj]
+  "Returns #t if OBJ is a vector; otherwise returns #f."
+  (= (getmetatable obj) vector-mt))
 ;; store length as field :n to match Lua's convention
 (fn make-vector [k fill]
-  "Returns a newly allocated vector of ~k~ elements. If a second
-argument is given, then each element is initialized to ~fill~.
+  "Returns a newly allocated vector of K elements. If a second
+argument is given, then each element is initialized to FILL.
 Otherwise the initial contents of each element is unspecified. (r7rs 48)"
   (assert (number? k))
   (let [vec (setmetatable {:n k} vector-mt)]
@@ -224,29 +227,29 @@ the given arguments. It is analogous to list. (r7rs 48)"
 (fn vector-length [v]
   "Returns the number of elements in vector as an exact integer. (r7rs 48)"
   v.n)
-(fn raw-vector-ref [vec k obj force?]
+(fn unchecked-vector-ref [vec k obj force?]
   (zaccess vec k obj force?))
 (fn vector-ref [vec k obj force?]
-  "The vector-ref procedure returns the contents of element
-k of vector (r7rs 48).
+  "The `vector-ref' procedure returns the contents of element
+K of [VEC] (r7rs 48).
 
 'Undocumented' extention: behaves like accessor if you pass extra args"
-  (debug-assert (vector? vec))
+  (debug-assert (vector? vec)) ; allow byte-vectors for the minute
   (debug-assert (number? k))
-  ;; It is an error if ~k~ is not a valid index of vector. (r7rs 48)
+  ;; It is an error if K is not a valid index of vector. (r7rs 48)
   (debug-assert (and (<= 0 k) (< k (vector-length vec))))
-  (raw-vector-ref vec k obj force?))
+  (unchecked-vector-ref vec k obj force?))
 (fn vector-set! [vec k obj]
-  "The vector-set! procedure stores obj in element k of
-vector (r7rs 48)."
+  "The `vector-set!' procedure stores OBJ in element K of
+[VEC] (r7rs 48)."
   (vector-ref vec k obj true))
 (macro xfor [[var start end] ...]
-  "For but with half-open interval: [start,end)"
+  "For but with a half-open interval: [start,end)"
   `(for [,var ,start (- ,end 1)]
     ,...))
 (fn vector-fill! [vec fill start end]
-  "The ~vector-fill!~ procedure stores fill in the elements of
-vector between start and end."
+  "The `vector-fill!' procedure stores fill in the elements of
+[VEC] between START and END."
   (let [start (or start 0)
         end   (or end (length end))]
     (xfor [i start end]
@@ -272,9 +275,9 @@ vector between start and end."
                       (no-overlap? [at (+ at len)] [start end])))
     (xfor [i 0 len]
       (vector-set to (+ at i)
-                  (raw-vector-set! (+ start i))))))
+                  (unchecked-vector-set! (+ start i))))))
 ;; TODO: improve name. My real goal for this function is to allow growing vectors.
-(fn raw-vector-copy! [to at from start end]
+(fn unchecked-vector-copy! [to at from start end]
   ;; TODO: optimize
   ;; > This can be achieved without allocating storage by
   ;; > making sure to copy in the correct direction in
@@ -287,41 +290,111 @@ vector between start and end."
         (vector-copy-no-overlap! to at buf 0 len))
       (vector-copy-no-overlap! to at from start end)))
 (fn vector-copy! [to at from start end]
-  "It is an error if at is less than zero or greater than the length
-of to. It is also an error if (- (vector-length to) at) is less
-than (- end start).
+  "Copies the elements of vector FROM between START and END to vector TO, starting at AT.
+The order in which elements are copied is unspecified, except that if the
+source and destination overlap, copying takes place as if the source is
+first copied into a temporary vector and then into the destination. This
+can be achieved without allocating storage by making sure to copy in the
+correct direction in such circumstances.
 
-Copies the elements of vector from between start and end
-to vector to, starting at at. The order in which elements
-are copied is unspecified, except that if the source and des-
-tination overlap, copying takes place as if the source is first
-copied into a temporary vector and then into the destina-
-tion. This can be achieved without allocating storage by
-making sure to copy in the correct direction in such cir-
-cumstances. (r7rs 49)"
+It is an error if AT is less than zero or greater than the length
+of TO. It is also an error if (- (vector-length TO) AT) is less
+than (- END START). (r7rs 49)"
   (debug-do
    (let [start (or start 0)
          end   (or end (vector-length from))]
      (assert (not (or (< at 0) (> at (length to))))
-                   "It is an error if at is less than zero or greater than the length of to (r7rs 49).")
-     (assert (not (< (- (vector-length to) at)
-                           (- end start)))
-                   "It is also an error if (- (vector-length to) at) is less than (- end start). (r7rs 49)")))
-  (raw-vector-copy! to at from start end))
+             "It is an error if at is less than zero or greater than the length of to (r7rs 49).") (assert (not (< (- (vector-length to) at) (- end start)))
+             "It is also an error if (- (vector-length to) at) is less than (- end start). (r7rs 49)")))
+  (unchecked-vector-copy! to at from start end))
 (fn vector-copy [vec start end]
   (let [start (or start 0)
         end (or end (vector-length vec))
-        new-vec {}]
-    (tset :n new-vec (- end start))
-    (raw-vector-copy! new-vec 0 vec)
-    new-vec))
+        new (vector)]
+    (tset :n new (- end start))
+    (vector-copy-no-overlap! new 0 vec)
+    new))
 
-(local bytevector-mt {})
-(fn bytevector? [x]
+;; 6.9 bytevector
+;; Naive implementation as a vector of bytes
+(local bytevector-mt {:__index vector-mt})
+(fn bytevector? [obj]
+  "Returns #t if OBJ is a bytevector. Otherwise, #f is returned. (r7rs 49)"
   (= (getmetatable x) bytevector-mt))
+(fn make-bytevector [k byte]
+  "The `make-bytevector' procedure returns a newly allocated
+bytevector of length K. If BYTE is given, then all elements
+of the bytevector are initialized to BYTE, otherwise the
+contents of each element are unspecified. (r7rs 49)"
+  (setmetatable (make-vector k byte) bytevector-mt))
+(fn bytevector [...]
+  "Returns a newly allocated bytevector containing its arguments."
+  (setmetatable (vector ...) bytevector-mt))
+(fn bytevector-length [v]
+  "Returns the length of [V] in bytes as an exact integer."
+  (vector-length v))
+(fn call-as-vector [v f]
+  (setmetatable v vector-mt)
+  (local ret (f v))
+  (setmetatable v bytevector-mt)
+  ret)
+(macro as-vector [[v & vs] ...]
+  (if (= v nil)
+      `(do ,...)
+      `(call-as-vector v
+        (fn [,v] (as-vector ,vs ,...)))))
+(fn bytevector-u8-ref [v idx val force?]
+  "Returns the K th byte of [V]
+It is an error if K is not a valid index of [V] (r7rs 50)."
+  (as-vector [v]
+    (vector-ref v idx val force?)))
+(fn bytevector-u8-set! [v k byte force?]
+  "It is an error if K is not a valid index of [V]
+Stores BYTE as the K th byte of [V] (r7rs 50)."
+  (bytevector-u8-ref v k byte force?))
+(fn bytevector-copy [v start end]
+  "Returns a newly allocated bytevector containing the bytes
+in [V] between START and END (r7rs 50)."
+  (setmetatable
+   (as-vector [v]
+     (vector-copy v start end))
+   bytevector-mt))
+(fn bytevector-copy! [to at from start end]
+  "Copies the bytes of bytevector FROM between START and END to bytevector TO, starting at AT.
+ The order in which bytes are copied is unspecified, except that
+if the source and destination overlap, copying takes place as if the source
+is first copied into a temporary bytevector and then into the destination.
+This can be achieved without allocating storage by making sure to copy in
+the correct direction in such circumstances.
+
+It is an error if AT is less than zero or greater than the length
+of TO. It is also an error if (- (bytevector-length TO) AT) is
+less than (- END START). (r7rs 50)"
+  (as-vector [to from]
+    (vector-copy! to at from start end)))
+;; TODO: bytevector-append
+
+;; 6.10 control features
+(fn append-last [args]
+  (let [pop! table.remove
+        last (pop! args)]
+    (each [_ x (ipairs last)]
+      (table.insert args x))
+    args))
+(fn apply [f & args]
+  (f (table.unpack (append-last args))))
+
+;; ports/io
+;; I think I can make a port just a stream from lua?
+;; I think it depends on parameterize, at least for current-error-port
+(fn current-input-port [] (io.input))
+(fn current-output-port [] (io.output))
+;; os.tmpname or io.tmpfile for opening strings as ports?
 
 {: null : null? : cons : car : cdr : pair? : list : cons*}
 
 ;; Local Variables:
 ;; eval: (put 'xfor 'fennel-indent-function 'defun)
+;; eval: (put 'as-vector1 'fennel-indent-function 'defun)
+;; eval: (put 'as-vector 'fennel-indent-function 'defun)
 ;; End:
